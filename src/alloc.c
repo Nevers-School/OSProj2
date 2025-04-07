@@ -102,27 +102,27 @@ void *coalesce(free_block *block) {
     free_block *prev = find_prev(block);
     free_block *next = find_next(block);
 
-    // Coalesce with previous block if it is contiguous.
+
     if (prev != NULL) {
         char *end_of_prev = (char *)prev + prev->size + sizeof(free_block);
         if (end_of_prev == (char *)block) {
             prev->size += block->size + sizeof(free_block);
 
-            // Ensure prev->next is updated to skip over 'block', only if 'block' is directly next to 'prev'.
+
             if (prev->next == block) {
                 prev->next = block->next;
             }
-            block = prev; // Update block to point to the new coalesced block.
+            block = prev; 
         }
     }
 
-    // Coalesce with next block if it is contiguous.
+
     if (next != NULL) {
         char *end_of_block = (char *)block + block->size + sizeof(free_block);
         if (end_of_block == (char *)next) {
             block->size += next->size + sizeof(free_block);
 
-            // Ensure block->next is updated to skip over 'next'.
+
             block->next = next->next;
         }
     }
@@ -137,7 +137,12 @@ void *coalesce(free_block *block) {
  * @return A pointer to the allocated memory
  */
 void *do_alloc(size_t size) {
-    return NULL;
+
+    void *ptr = sbrk(size);
+    if (ptr == (void *)-1) {
+	return NULL;
+    }
+    return ptr;
 }
 
 /**
@@ -147,7 +152,32 @@ void *do_alloc(size_t size) {
  * @return A pointer to the requested block of memory
  */
 void *tumalloc(size_t size) {
-    return NULL;
+    // aligns the size
+    size = (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
+
+
+    free_block *curr = HEAD, *prev = NULL;
+    while (curr != NULL) {
+        if (curr->size >= size + sizeof(free_block)) {
+            if (prev) {
+                prev->next = curr->next;
+            } else {
+                HEAD = curr->next;
+            }
+            return (char *)curr + sizeof(size_t);
+        }
+        prev = curr;
+        curr = curr->next;
+    }
+
+
+    void *ptr = do_alloc(size + sizeof(size_t));
+    if (ptr == NULL) {
+        return NULL;
+    }
+
+    *(size_t *)ptr = size;
+    return (char *)ptr + sizeof(size_t);
 }
 
 /**
@@ -155,10 +185,17 @@ void *tumalloc(size_t size) {
  *
  * @param num How many elements to allocate
  * @param size The size of each element
- * @return A pointer to the requested block of initialized memory
- */
+ * @return A pointer to the requested block of initialized memory */
 void *tucalloc(size_t num, size_t size) {
-    return NULL;
+    // calculate the total size to allocate
+    size_t total_size = num * size;
+
+    void *ptr = tumalloc(total_size);
+    if (ptr == NULL) {
+        return NULL;
+    }
+    memset(ptr, 0, total_size);
+    return ptr;
 }
 
 /**
@@ -169,7 +206,33 @@ void *tucalloc(size_t num, size_t size) {
  * @return A new pointer containing the contents of ptr, but with the new_size
  */
 void *turealloc(void *ptr, size_t new_size) {
-    return NULL;
+
+    if (ptr == NULL) {
+        return tumalloc(new_size);
+    }
+
+  
+    if (new_size == 0) {
+        tufree(ptr);
+        return NULL;
+    }
+
+    size_t old_size = *((size_t *)((char *)ptr - sizeof(size_t)));
+
+     if (old_size >= new_size) {
+        return ptr;
+    }
+
+
+    void *new_ptr = tumalloc(new_size);
+    if (new_ptr == NULL) {
+        return NULL;
+    }
+
+    memcpy(new_ptr, ptr, old_size);
+
+    tufree(ptr);
+    return new_ptr;
 }
 
 /**
@@ -178,5 +241,12 @@ void *turealloc(void *ptr, size_t new_size) {
  * @param ptr Pointer to the allocated piece of memory
  */
 void tufree(void *ptr) {
+    if (ptr == NULL) {
+        return;
+    }
 
+    free_block *block = (free_block *)((char *)ptr - sizeof(size_t));
+    block->next = HEAD;
+    HEAD = block;
+    coalesce(block);
 }
